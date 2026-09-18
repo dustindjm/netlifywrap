@@ -1,0 +1,240 @@
+/*
+  Remote MCP server — Streamable HTTP transport, stateless.
+
+  Mount points (see netlify.toml):
+    POST /mcp/<shared-secret>   the connector URL you paste into Claude
+    POST /mcp                   same, with the secret in an Authorization header
+
+  JSON-RPC 2.0 over a single POST, answered with a single JSON response. No
+  SSE stream and no session id: every request carries everything it needs, so
+  the function stays stateless across cold starts.
+
+  Auth is a shared secret the operator sets as MCP_SHARED_SECRET. The Netlify
+  access token the tools call with is never exposed to the client.
+*/
+
+const crypto = require('crypto');
+const { toolSchemas, callTool, isReadOnly, siteAllowlist } = require('../lib/mcp-tools');
+const { apiToken } = require('../lib/netlify-api');
+
+const SERVER_INFO = { name: 'netlify-connector', title: 'Netlify', version: '1.0.0' };
+const SUPPORTED_PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
+const LATEST_PROTOCOL = SUPPORTED_PROTOCOLS[0];
+
+const INSTRUCTIONS = `Tools for administering Netlify sites through the Netlify API.
+
+Call netlify_whoami first if you are unsure which account or site this connector reaches.
+Identify a site by id, name or domain — most tools accept any of the three.
+To diagnose a failed deploy: netlify_list_deploys with state "error", then netlify_get_deploy
+for the error message and the build-log link.
+Environment variable changes only reach the live site after a new build, so follow
+netlify_set_env_var with netlify_trigger_build.`;
+
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers':
+    'Content-Type, Authorization, X-MCP-Token, Mcp-Session-Id, MCP-Protocol-Version, Accept',
+  'Access-Control-Max-Age': '86400',
+};
+const JSON_HEADERS = { 'Content-Type': 'application/json', ...CORS_HEADERS };
+
+function sharedSecret() {
+  return process.env.MCP_SHARED_SECRET || process.env.NETLIFY_MCP_TOKEN || '';
+}
+
+function secretsMatch(given, expected) {
+  // Hash first so the comparison is constant-time regardless of length.
+  const a = crypto.createHash('sha256').update(String(given)).digest();
+  const b = crypto.createHash('sha256').update(String(expected)).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+function presentedSecret(event) {
+  const headers = event.headers || {};
+  const auth = headers.authorization || headers.Authorization || '';
+  const bearer = /^Bearer\s+(.+)$/i.exec(auth);
+  const query = event.queryStringParameters || {};
+  return (bearer && bearer[1].trim()) || headers['x-mcp-token'] || query.k || query.token || '';
+}
+
+function readBody(event) {
+  if (!event.body) return '';
+  return event.isBase64Encoded ? Buffer.from(event.body, 'base64').toString('utf8') : event.body;
+}
+
+function rpcError(id, code, message, data) {
+  return { jsonrpc: '2.0', id: id === undefined ? null : id, error: { code, message, ...(data ? { data } : {}) } };
+}
+
+function rpcResult(id, result) {
+  return { jsonrpc: '2.0', id, result };
+}
+
+function textContent(value) {
+  const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  return [{ type: 'text', text }];
+}
+
+async function handleMessage(message) {
+  if (!message || message.jsonrpc !== '2.0' || typeof message.method !== 'string') {
+    return rpcError(message && message.id, -32600, 'Invalid JSON-RPC request.');
+  }
+
+  const { id, method, params } = message;
+  const isNotification = id === undefined || id === null;
+
+  switch (method) {
+    case 'initialize': {
+      const wanted = params && params.protocolVersion;
+      return rpcResult(id, {
+        protocolVersion: SUPPORTED_PROTOCOLS.includes(wanted) ? wanted : LATEST_PROTOCOL,
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: SERVER_INFO,
+        instructions: INSTRUCTIONS,
+      });
+    }
+
+    case 'notifications/initialized':
+    case 'notifications/cancelled':
+    case 'initialized':
+      return null;
+
+    case 'ping':
+      return isNotification ? null : rpcResult(id, {});
+
+    case 'tools/list':
+      return rpcResult(id, { tools: toolSchemas() });
+
+    // Declared in neither capability, but clients probe for them anyway.
+    case 'resources/list':
+      return rpcResult(id, { resources: [] });
+    case 'resources/templates/list':
+      return rpcResult(id, { resourceTemplates: [] });
+    case 'prompts/list':
+      return rpcResult(id, { prompts: [] });
+
+    case 'tools/call': {
+      const name = params && params.name;
+      if (!name) return rpcError(id, -32602, 'tools/call requires a tool name.');
+      try {
+        const result = await callTool(name, (params && params.arguments) || {});
+        return rpcResult(id, { content: textContent(result), isError: false });
+      } catch (err) {
+        console.error(`mcp tool ${name} failed:`, err && err.message);
+        // Tool failures are results, not protocol errors, so the model can react.
+        return rpcResult(id, {
+          content: textContent(`Error from ${name}: ${(err && err.message) || 'unknown error'}`),
+          isError: true,
+        });
+      }
+    }
+
+    default:
+      return isNotification ? null : rpcError(id, -32601, `Method not found: ${method}`);
+  }
+}
+
+exports.handler = async (event) => {
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 204, headers: CORS_HEADERS, body: '' };
+  }
+
+  // Stateless server: nothing to tear down, but clients expect a clean close.
+  if (event.httpMethod === 'DELETE') {
+    return { statusCode: 204, headers: CORS_HEADERS, body: '' };
+  }
+
+  if (event.httpMethod === 'GET') {
+    return {
+      statusCode: 405,
+      headers: { ...JSON_HEADERS, Allow: 'POST, DELETE, OPTIONS' },
+      body: JSON.stringify({
+        error: 'This MCP endpoint speaks JSON-RPC over POST. Server-initiated SSE streams are not offered.',
+        server: SERVER_INFO,
+        protocol_versions: SUPPORTED_PROTOCOLS,
+      }),
+    };
+  }
+
+  if (event.httpMethod !== 'POST') {
+    return {
+      statusCode: 405,
+      headers: { ...JSON_HEADERS, Allow: 'POST, DELETE, OPTIONS' },
+      body: JSON.stringify({ error: 'Method not allowed' }),
+    };
+  }
+
+  const expected = sharedSecret();
+  if (!expected) {
+    // Fail closed. An unsecured endpoint would hand anyone the Netlify token's reach.
+    return {
+      statusCode: 503,
+      headers: JSON_HEADERS,
+      body: JSON.stringify({
+        error:
+          'This connector is not configured: MCP_SHARED_SECRET is unset, so the endpoint refuses every request.',
+      }),
+    };
+  }
+  if (!apiToken()) {
+    return {
+      statusCode: 503,
+      headers: JSON_HEADERS,
+      body: JSON.stringify({
+        error: 'This connector is not configured: NETLIFY_API_TOKEN is unset.',
+      }),
+    };
+  }
+
+  const given = presentedSecret(event);
+  if (!given || !secretsMatch(given, expected)) {
+    return {
+      statusCode: 401,
+      headers: JSON_HEADERS,
+      body: JSON.stringify({
+        error:
+          'Unauthorized. Use the full connector URL including its secret path segment, or send Authorization: Bearer <secret>.',
+      }),
+    };
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(readBody(event));
+  } catch {
+    return { statusCode: 400, headers: JSON_HEADERS, body: JSON.stringify(rpcError(null, -32700, 'Parse error.')) };
+  }
+
+  const batch = Array.isArray(payload);
+  const messages = batch ? payload : [payload];
+  if (batch && !messages.length) {
+    return { statusCode: 400, headers: JSON_HEADERS, body: JSON.stringify(rpcError(null, -32600, 'Empty batch.')) };
+  }
+
+  const responses = [];
+  for (const message of messages) {
+    try {
+      const response = await handleMessage(message);
+      if (response) responses.push(response);
+    } catch (err) {
+      console.error('mcp dispatch failed:', err);
+      responses.push(rpcError(message && message.id, -32603, (err && err.message) || 'Internal error.'));
+    }
+  }
+
+  // Notifications only: acknowledge with no content, as the transport requires.
+  if (!responses.length) {
+    return { statusCode: 202, headers: CORS_HEADERS, body: '' };
+  }
+
+  return {
+    statusCode: 200,
+    headers: JSON_HEADERS,
+    body: JSON.stringify(batch ? responses : responses[0]),
+  };
+};
+
+// Exported for the local smoke test in scripts/mcp-smoke.js.
+exports.handleMessage = handleMessage;
+exports.meta = { SERVER_INFO, SUPPORTED_PROTOCOLS, isReadOnly, siteAllowlist };

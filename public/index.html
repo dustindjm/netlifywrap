@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Netlify Connector</title>
+<meta name="description" content="Set up this MCP server as a custom connector in Claude: read deploys, trigger builds and manage Netlify environment variables from a conversation.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#f8f5ed">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* ==========================================================================
+     Paper-notebook system: cream canvas, ink hairlines, one rationed highlighter.
+     No shadows anywhere — containers are defined by 1px ink lines at 24px radius.
+     ========================================================================== */
+  :root {
+    color-scheme: light;
+
+    --color-sunshine-highlight: #ffda6e;
+    --color-mint-signal: #6ece9d;
+    --color-cream-paper: #f8f5ed;
+    --color-ink: #000000;
+    --color-graphite: #707070;
+
+    --font-dm-sans: 'DM Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+    --text-caption: 14px;
+    --text-body-sm: 16px;
+    --text-body: 18px;
+    --text-subheading: 20px;
+    --text-heading-sm: 24px;
+    --text-heading: 28px;
+    --text-display: 64px;
+    --tracking-display: -1.02px;
+
+    --fw-regular: 400;
+    --fw-medium: 500;
+
+    --spacing-8: 8px;
+    --spacing-16: 16px;
+    --spacing-24: 24px;
+    --spacing-32: 32px;
+    --spacing-48: 48px;
+    --spacing-64: 64px;
+    --spacing-128: 128px;
+
+    --page-max-width: 1200px;
+    --section-gap: 64px;
+    --card-padding: 32px;
+
+    --radius-tags: 9999px;
+    --radius-cards: 24px;
+    --radius-images: 12px;
+    --radius-inputs: 6px;
+    --radius-buttons: 24px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--color-cream-paper);
+    color: var(--color-ink);
+    font-family: var(--font-dm-sans);
+    font-feature-settings: "ss03", "ss04";
+    font-size: var(--text-body);
+    font-weight: var(--fw-regular);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page { max-width: 880px; margin: 0 auto; padding: var(--spacing-48) var(--spacing-16) var(--spacing-128); }
+  .band { margin-top: var(--section-gap); }
+  .center { text-align: center; }
+  .stack-8 > * + * { margin-top: var(--spacing-8); }
+  .stack-16 > * + * { margin-top: var(--spacing-16); }
+  .stack-24 > * + * { margin-top: var(--spacing-24); }
+
+  /* ---- masthead ------------------------------------------------------ */
+  .masthead {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-16);
+    margin-bottom: var(--spacing-64);
+  }
+  .wordmark {
+    font-size: var(--text-body-sm);
+    font-weight: var(--fw-medium);
+    letter-spacing: 0.02em;
+  }
+  .avatar-tile {
+    width: 48px; height: 48px;
+    flex: none;
+    display: grid; place-items: center;
+    border: 1px solid var(--color-ink);
+    border-radius: var(--radius-images);
+    background: var(--color-cream-paper);
+    font-size: var(--text-subheading);
+    font-weight: var(--fw-medium);
+  }
+
+  /* ---- type ---------------------------------------------------------- */
+  h1, h2, h3 { font-weight: var(--fw-medium); margin: 0; }
+  h1 {
+    font-size: clamp(36px, 8.5vw, var(--text-display));
+    line-height: 1.25;
+    letter-spacing: var(--tracking-display);
+  }
+  h2 {
+    font-size: clamp(28px, 6vw, 44px);
+    line-height: 1.25;
+    letter-spacing: -0.016em;
+  }
+  h3 { font-size: var(--text-heading-sm); line-height: 1.5; }
+  p { margin: 0; }
+  .subhead {
+    font-size: var(--text-body);
+    color: var(--color-graphite);
+    max-width: 640px;
+  }
+  .center .subhead { margin-left: auto; margin-right: auto; }
+  .caption { font-size: var(--text-caption); color: var(--color-graphite); line-height: 1.5; }
+  .muted { color: var(--color-graphite); }
+  a { color: var(--color-graphite); text-decoration: underline; text-underline-offset: 2px; }
+  a:hover { color: var(--color-ink); }
+
+  /* ---- step badge ---------------------------------------------------- */
+  .step-badge {
+    display: inline-flex;
+    align-items: stretch;
+    border: 1px solid var(--color-ink);
+    border-radius: var(--radius-tags);
+    overflow: hidden;
+    background: var(--color-cream-paper);
+    font-size: var(--text-caption);
+    font-weight: var(--fw-medium);
+  }
+  .step-badge > .num {
+    width: 24px;
+    display: grid; place-items: center;
+    border-right: 1px solid var(--color-ink);
+  }
+  .step-badge > .name {
+    padding: 4px var(--spacing-16) 4px 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.286em;
+  }
+
+  /* ---- buttons ------------------------------------------------------- */
+  .btn {
+    display: inline-block;
+    font-family: inherit;
+    font-feature-settings: inherit;
+    font-size: var(--text-body-sm);
+    font-weight: var(--fw-medium);
+    line-height: 1.5;
+    padding: var(--spacing-16) var(--spacing-24);
+    border-radius: var(--radius-buttons);
+    border: 1px solid var(--color-ink);
+    background: transparent;
+    color: var(--color-ink);
+    cursor: pointer;
+    text-align: center;
+  }
+  .btn--sunshine { background: var(--color-sunshine-highlight); }
+  .btn:disabled { cursor: progress; opacity: 0.5; }
+  .btn--compact { padding: 10px var(--spacing-24); }
+
+  /* ---- cards --------------------------------------------------------- */
+  .card {
+    background: var(--color-cream-paper);
+    border: 1px solid var(--color-ink);
+    border-radius: var(--radius-cards);
+    padding: var(--card-padding);
+  }
+  .grid-2 { display: grid; gap: var(--spacing-32); }
+  @media (min-width: 720px) { .grid-2 { grid-template-columns: 1fr 1fr; } }
+
+  /* ---- steps --------------------------------------------------------- */
+  ol.steps { list-style: none; counter-reset: step; margin: 0; padding: 0; }
+  ol.steps > li {
+    counter-increment: step;
+    position: relative;
+    padding-left: 48px;
+    margin-top: var(--spacing-48);
+  }
+  ol.steps > li:first-child { margin-top: 0; }
+  /* Same 24px ink-bordered numeral cell as the step badge, so the sub-steps
+     read as part of the same counting system. */
+  ol.steps > li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 2px;
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--color-ink);
+    border-radius: var(--radius-inputs);
+    background: var(--color-cream-paper);
+    font-size: var(--text-caption);
+    font-weight: var(--fw-medium);
+  }
+  @media (max-width: 560px) {
+    ol.steps > li { padding-left: 0; }
+    ol.steps > li::before { position: static; margin-bottom: var(--spacing-8); }
+  }
+
+  /* ---- code ---------------------------------------------------------- */
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+  }
+  code.block {
+    display: block;
+    font-size: var(--text-caption);
+    line-height: 1.7;
+    border: 1px solid var(--color-ink);
+    border-radius: var(--radius-images);
+    padding: var(--spacing-16);
+    white-space: pre;
+    overflow-x: auto;
+  }
+  code.inline {
+    border: 1px solid var(--color-graphite);
+    border-radius: var(--radius-inputs);
+    padding: 1px 5px;
+    white-space: nowrap;
+  }
+
+  /* ---- form ---------------------------------------------------------- */
+  label {
+    display: block;
+    font-size: var(--text-caption);
+    font-weight: var(--fw-medium);
+    text-transform: uppercase;
+    letter-spacing: 0.286em;
+    margin-bottom: var(--spacing-8);
+  }
+  .field-row { display: flex; gap: var(--spacing-8); flex-wrap: wrap; }
+  input[type="text"] {
+    flex: 1 1 280px;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    padding: 12px 14px;
+    border: 1px solid var(--color-ink);
+    border-radius: var(--radius-inputs);
+    background: var(--color-cream-paper);
+    color: var(--color-ink);
+  }
+  input[type="text"]::placeholder { color: var(--color-graphite); }
+  input[type="text"]:focus-visible,
+  .btn:focus-visible { outline: 2px solid var(--color-ink); outline-offset: 2px; }
+
+  /* ---- tables -------------------------------------------------------- */
+  .table-frame {
+    border: 1px solid var(--color-ink);
+    border-radius: var(--radius-cards);
+    overflow: hidden;
+  }
+  .table-scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: var(--text-caption); }
+  th, td {
+    text-align: left;
+    padding: 14px var(--spacing-24);
+    border-bottom: 1px solid var(--color-graphite);
+    vertical-align: top;
+  }
+  th {
+    font-weight: var(--fw-medium);
+    text-transform: uppercase;
+    letter-spacing: 0.286em;
+    border-bottom: 1px solid var(--color-ink);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td:first-child { font-family: var(--font-mono); white-space: nowrap; }
+  td .tag {
+    display: inline-block;
+    margin-left: var(--spacing-8);
+    padding: 0 10px;
+    border: 1px solid var(--color-ink);
+    border-radius: var(--radius-tags);
+    font-family: var(--font-dm-sans);
+    font-size: 12px;
+    font-weight: var(--fw-medium);
+  }
+
+  /* ---- callouts ------------------------------------------------------ */
+  .callout {
+    background: var(--color-sunshine-highlight);
+    border: 1px solid var(--color-ink);
+    border-radius: var(--radius-cards);
+    padding: var(--spacing-24);
+    font-size: var(--text-body-sm);
+  }
+  .result-note {
+    border: 1px solid var(--color-ink);
+    border-radius: var(--radius-cards);
+    padding: var(--spacing-24);
+    font-size: var(--text-body-sm);
+  }
+  .status-dot {
+    display: inline-block;
+    width: 12px; height: 12px;
+    border-radius: var(--radius-tags);
+    background: var(--color-mint-signal);
+    border: 1px solid var(--color-ink);
+    margin-right: 10px;
+    vertical-align: baseline;
+  }
+  pre.out {
+    margin: var(--spacing-16) 0 0;
+    max-height: 300px;
+    overflow: auto;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.7;
+    border: 1px solid var(--color-graphite);
+    border-radius: var(--radius-images);
+    padding: var(--spacing-16);
+  }
+  ul.plain { margin: 0; padding-left: var(--spacing-24); }
+  ul.plain > li { margin-bottom: var(--spacing-16); color: var(--color-graphite); }
+  ul.plain strong { color: var(--color-ink); font-weight: var(--fw-medium); }
+
+  footer {
+    margin-top: var(--spacing-128);
+    padding-top: var(--spacing-24);
+    border-top: 1px solid var(--color-graphite);
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="masthead">
+    <span class="avatar-tile" aria-hidden="true">◈</span>
+    <span class="wordmark">Netlify Connector</span>
+  </header>
+
+  <section class="center stack-24">
+    <span class="step-badge"><span class="num">1</span><span class="name">Easy start</span></span>
+    <h1>Let Claude run your Netlify.</h1>
+    <p class="subhead">
+      This site is an MCP server that wraps the Netlify API. Add its URL to Claude as a custom
+      connector and you can read failed deploy logs, trigger builds, roll back a bad release and
+      manage environment variables — from inside a conversation.
+    </p>
+  </section>
+
+  <section class="band">
+    <span class="step-badge"><span class="num">2</span><span class="name">Setup</span></span>
+    <ol class="steps" style="margin-top:var(--spacing-32);">
+      <li>
+        <h3 style="margin-bottom:var(--spacing-8);">Create a Netlify access token</h3>
+        <p class="subhead">
+          In Netlify: <strong>User settings → Applications → Personal access tokens</strong>. The
+          token carries your full Netlify permissions, so treat it like a password. It stays on the
+          server and is never sent to Claude.
+        </p>
+      </li>
+      <li>
+        <h3 style="margin-bottom:var(--spacing-8);">Set two environment variables</h3>
+        <p class="subhead" style="margin-bottom:var(--spacing-16);">
+          On this site, under <strong>Site configuration → Environment variables</strong>:
+        </p>
+        <code class="block">NETLIFY_API_TOKEN  = your Netlify personal access token
+MCP_SHARED_SECRET  = a long random string (generate one below)</code>
+        <p class="caption" style="margin-top:var(--spacing-16);">
+          Until both are set the endpoint answers every request with 503 — it fails closed rather
+          than handing the token's reach to whoever finds the URL. Changes need a redeploy to reach
+          the function.
+        </p>
+      </li>
+      <li>
+        <h3 style="margin-bottom:var(--spacing-8);">Build your connector URL</h3>
+        <p class="subhead" style="margin-bottom:var(--spacing-24);">
+          The secret travels as the last path segment, because Claude's custom-connector form takes
+          a URL and nothing else.
+        </p>
+        <div class="card">
+          <button type="button" class="btn btn--sunshine" id="gen">Generate a secret</button>
+
+          <div style="margin-top:var(--spacing-32);">
+            <label for="secret">Shared secret</label>
+            <div class="field-row">
+              <input type="text" id="secret" placeholder="MCP_SHARED_SECRET" spellcheck="false" autocomplete="off">
+            </div>
+          </div>
+
+          <div style="margin-top:var(--spacing-24);">
+            <label for="url">Connector URL</label>
+            <div class="field-row">
+              <input type="text" id="url" readonly placeholder="generate or paste a secret" aria-label="Connector URL">
+              <button type="button" class="btn btn--compact" id="copy">Copy</button>
+            </div>
+          </div>
+
+          <p class="caption" style="margin-top:var(--spacing-24);">
+            Nothing here is sent anywhere or stored — the value lives in this page until you close
+            it. Keep the URL private: anyone holding it has the same reach as your Netlify token.
+          </p>
+        </div>
+      </li>
+      <li>
+        <h3 style="margin-bottom:var(--spacing-8);">Add it in Claude</h3>
+        <p class="subhead">
+          <strong>Settings → Connectors → Add custom connector</strong>, paste the URL, save. Then
+          run the handshake below, or just ask <em>"which Netlify sites can you see?"</em>
+        </p>
+      </li>
+    </ol>
+  </section>
+
+  <section class="band">
+    <span class="step-badge"><span class="num">3</span><span class="name">Instant output</span></span>
+    <h2 style="margin-top:var(--spacing-24);">Test the connection.</h2>
+    <p class="subhead" style="margin-top:var(--spacing-16);">
+      Runs a real handshake against the endpoint — <code class="inline">initialize</code> then
+      <code class="inline">tools/list</code> — exactly as Claude does on connect.
+    </p>
+    <div style="margin-top:var(--spacing-24);">
+      <button type="button" class="btn" id="test">Run handshake</button>
+    </div>
+    <div id="result" role="status" aria-live="polite" style="margin-top:var(--spacing-24);"></div>
+  </section>
+
+  <section class="band">
+    <span class="step-badge"><span class="num">4</span><span class="name">Tools</span></span>
+    <h2 style="margin-top:var(--spacing-24);">Twenty tools, seven of them writes.</h2>
+    <p class="subhead" style="margin-top:var(--spacing-16);margin-bottom:var(--spacing-32);">
+      Most accept a site id, site name, <code class="inline">*.netlify.app</code> host or custom
+      domain, so you can name a site however you happen to think of it.
+    </p>
+    <div class="table-frame">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Tool</th><th>Does</th></tr></thead>
+          <tbody>
+            <tr><td>netlify_whoami</td><td>Confirm which account the connector reaches, and which safety switches are on</td></tr>
+            <tr><td>netlify_list_accounts</td><td>List teams, with the slug environment-variable tools need</td></tr>
+            <tr><td>netlify_list_sites</td><td>List sites with urls, repo and last published deploy</td></tr>
+            <tr><td>netlify_get_site</td><td>One site's build settings, domains and published deploy</td></tr>
+            <tr><td>netlify_list_deploys</td><td>Deploy history, filterable by state or branch</td></tr>
+            <tr><td>netlify_get_deploy</td><td>One deploy: error message, summary, build-log link</td></tr>
+            <tr><td>netlify_list_site_functions</td><td>Functions deployed on a site</td></tr>
+            <tr><td>netlify_list_build_hooks</td><td>Build hooks, with their URLs redacted</td></tr>
+            <tr><td>netlify_list_forms</td><td>Netlify Forms and submission counts</td></tr>
+            <tr><td>netlify_list_form_submissions</td><td>Read submissions for one form</td></tr>
+            <tr><td>netlify_list_env_vars</td><td>Environment variables; values withheld unless asked for</td></tr>
+            <tr><td>netlify_get_env_var</td><td>One variable by key</td></tr>
+            <tr><td>netlify_trigger_build<span class="tag">write</span></td><td>Start a build, optionally clearing the cache</td></tr>
+            <tr><td>netlify_cancel_deploy<span class="tag">write</span></td><td>Cancel a deploy in progress</td></tr>
+            <tr><td>netlify_rollback_deploy<span class="tag">write</span></td><td>Republish an earlier deploy</td></tr>
+            <tr><td>netlify_lock_deploy<span class="tag">write</span></td><td>Freeze the live deploy so pushes build but don't publish</td></tr>
+            <tr><td>netlify_unlock_deploy<span class="tag">write</span></td><td>Release that lock</td></tr>
+            <tr><td>netlify_set_env_var<span class="tag">write</span></td><td>Create or update a variable, per deploy context</td></tr>
+            <tr><td>netlify_delete_env_var<span class="tag">write</span></td><td>Remove a variable</td></tr>
+            <tr><td>netlify_api_request</td><td>Escape hatch to any Netlify API v1 endpoint</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <span class="step-badge"><span class="num">5</span><span class="name">Safety</span></span>
+    <h2 style="margin-top:var(--spacing-24);">Give it less, if you want.</h2>
+    <p class="subhead" style="margin-top:var(--spacing-16);margin-bottom:var(--spacing-32);">
+      All optional, all set the same way as the two required variables.
+    </p>
+    <div class="table-frame">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Variable</th><th>Effect</th></tr></thead>
+          <tbody>
+            <tr><td>NETLIFY_MCP_READ_ONLY</td><td><code class="inline">true</code> hides every write tool from Claude and refuses it if called anyway. Nothing can be built, rolled back or changed.</td></tr>
+            <tr><td>NETLIFY_MCP_SITES</td><td>Comma-separated site ids or names. Tools refuse any other site, and the raw API escape hatch switches off, since it would defeat the restriction.</td></tr>
+            <tr><td>NETLIFY_MCP_DEFAULT_SITE</td><td>Site used when a call omits one, so "trigger a build" works without naming it.</td></tr>
+            <tr><td>NETLIFY_MCP_ACCOUNT</td><td>Default team slug for environment-variable tools, when it can't be inferred from the site.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="grid-2" style="margin-top:var(--spacing-32);">
+      <div class="card">
+        <h3>Secrets stay secret</h3>
+        <p class="subhead" style="margin-top:var(--spacing-16);">
+          Environment variable values are never returned unless a call explicitly asks, and values
+          Netlify holds as secret are never returned at all.
+        </p>
+      </div>
+      <div class="card">
+        <h3>Rotation is one edit</h3>
+        <p class="subhead" style="margin-top:var(--spacing-16);">
+          Change <code class="inline">MCP_SHARED_SECRET</code> and every URL handed out before now
+          stops working immediately.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <span class="step-badge"><span class="num">6</span><span class="name">When it breaks</span></span>
+    <h2 style="margin-top:var(--spacing-24);">Four things go wrong.</h2>
+    <ul class="plain" style="margin-top:var(--spacing-32);">
+      <li><strong>503, "not configured".</strong> <code class="inline">NETLIFY_API_TOKEN</code> or <code class="inline">MCP_SHARED_SECRET</code> is missing, or the site hasn't redeployed since you set them.</li>
+      <li><strong>401.</strong> The secret in the URL doesn't match. Watch for a trailing slash or a truncated paste.</li>
+      <li><strong>Connects but lists no tools.</strong> Netlify rejected the token. Ask Claude to call <code class="inline">netlify_whoami</code>; the error comes back verbatim.</li>
+      <li><strong>"Not in this connector's allowlist".</strong> <code class="inline">NETLIFY_MCP_SITES</code> is set and doesn't include that site.</li>
+    </ul>
+  </section>
+
+  <section class="band center stack-24">
+    <div><span class="avatar-tile" style="margin:0 auto;" aria-hidden="true">◈</span></div>
+    <h2>Ready to hand over the keys?</h2>
+    <p class="subhead">
+      Generate a secret, set two variables, paste one URL. Read-only mode is one more variable if
+      you'd rather start by just looking.
+    </p>
+    <div><a class="btn btn--sunshine" href="#gen" id="jump">Back to setup</a></div>
+  </section>
+
+  <footer>
+    <p class="caption">
+      Independent of Netlify. "Netlify" is a trademark of Netlify, Inc.; this project is not
+      affiliated with or endorsed by them.
+    </p>
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  const secretInput = document.getElementById('secret');
+  const urlInput = document.getElementById('url');
+  const result = document.getElementById('result');
+
+  function render() {
+    const secret = secretInput.value.trim();
+    urlInput.value = secret ? location.origin + '/mcp/' + encodeURIComponent(secret) : '';
+  }
+
+  document.getElementById('gen').addEventListener('click', function () {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    secretInput.value = btoa(String.fromCharCode.apply(null, bytes))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    render();
+    secretInput.focus();
+  });
+
+  secretInput.addEventListener('input', render);
+
+  document.getElementById('jump').addEventListener('click', function (event) {
+    event.preventDefault();
+    document.getElementById('gen').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+
+  document.getElementById('copy').addEventListener('click', async function () {
+    if (!urlInput.value) return;
+    const button = this;
+    try {
+      await navigator.clipboard.writeText(urlInput.value);
+      button.textContent = 'Copied';
+      setTimeout(function () { button.textContent = 'Copy'; }, 1600);
+    } catch {
+      urlInput.removeAttribute('readonly');
+      urlInput.select();
+      document.execCommand('copy');
+      urlInput.setAttribute('readonly', '');
+    }
+  });
+
+  async function rpc(url, method, params) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: method, params: params || {} }),
+    });
+    const text = await res.text();
+    let body;
+    try { body = JSON.parse(text); } catch { body = text; }
+    return { status: res.status, body: body };
+  }
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+    });
+  }
+
+  function failureMessage(body) {
+    if (!body) return 'no response body';
+    if (typeof body === 'string') return body.slice(0, 400);
+    if (body.error) return typeof body.error === 'string' ? body.error : (body.error.message || JSON.stringify(body.error));
+    return JSON.stringify(body).slice(0, 400);
+  }
+
+  document.getElementById('test').addEventListener('click', async function () {
+    const url = urlInput.value;
+    if (!url) {
+      result.innerHTML = '<div class="callout">Generate or paste a secret first.</div>';
+      return;
+    }
+    this.disabled = true;
+    result.innerHTML = '<p class="caption">Running handshake…</p>';
+    try {
+      const init = await rpc(url, 'initialize', {
+        protocolVersion: '2025-06-18',
+        capabilities: {},
+        clientInfo: { name: 'netlify-connector-setup-page', version: '1.0.0' },
+      });
+
+      if (init.status !== 200 || !init.body || !init.body.result) {
+        result.innerHTML =
+          '<div class="callout"><strong>HTTP ' + init.status + '.</strong> ' +
+          escapeHtml(failureMessage(init.body)) + '</div>';
+        return;
+      }
+
+      const tools = await rpc(url, 'tools/list');
+      const list = (tools.body && tools.body.result && tools.body.result.tools) || [];
+      const info = init.body.result.serverInfo || {};
+      result.innerHTML =
+        '<div class="result-note"><span class="status-dot" aria-hidden="true"></span>' +
+        '<strong>Connected.</strong> ' + escapeHtml(info.name || 'server') +
+        ' v' + escapeHtml(info.version || '?') +
+        ', protocol ' + escapeHtml(init.body.result.protocolVersion) +
+        ', ' + list.length + ' tools available.' +
+        '<pre class="out">' +
+        escapeHtml(list.map(function (t) {
+          return t.name + (t.annotations && t.annotations.readOnlyHint ? '' : '  (write)');
+        }).join('\n')) +
+        '</pre></div>';
+    } catch (err) {
+      result.innerHTML = '<div class="callout">Request failed: ' + escapeHtml((err && err.message) || 'unknown error') + '</div>';
+    } finally {
+      this.disabled = false;
+    }
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "netlify-mcp-connector",
+  "version": "1.0.0",
+  "description": "Remote MCP server that wraps the Netlify API, deployable to Netlify and addable to Claude as a custom connector.",
+  "private": true,
+  "scripts": {
+    "dev": "netlify dev",
+    "test": "node scripts/mcp-smoke.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
