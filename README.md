@@ -5,14 +5,17 @@ a Netlify site. Add the URL to Claude as a custom connector and Claude can admin
 from a conversation: read failed deploys, trigger builds, roll back, and manage environment
 variables.
 
-It also serves its own setup page — secret generator, connector URL builder, and a live
-handshake test — at the site root.
+The site root is a live console for the same endpoint: unlock it with the shared secret and you
+get your sites, their deploy history, failed-build error messages, one-click builds and
+rollbacks, and the site's environment variables — every panel driven by real MCP tool calls, so
+what you see is exactly what Claude sees. It also hands you the connector URL to paste into
+Claude.
 
 ```
 netlify/functions/mcp.js    MCP transport: JSON-RPC over HTTP, auth, dispatch
 netlify/lib/netlify-api.js  Netlify API v1 client and response trimming
 netlify/lib/mcp-tools.js    Tool definitions and handlers
-public/index.html           Setup page with a live connection test
+public/index.html           Live console: sites, deploys, builds, env vars
 scripts/mcp-smoke.js        Offline test suite (npm test)
 ```
 
@@ -29,10 +32,10 @@ scripts/mcp-smoke.js        Offline test suite (npm test)
    | `NETLIFY_API_TOKEN` | the personal access token |
    | `MCP_SHARED_SECRET` | a long random string |
 
-4. Redeploy, then open the site root. It generates a secret, builds your connector URL and runs
-   a real handshake against the endpoint.
-5. In Claude: **Settings → Connectors → Add custom connector**, paste
-   `https://<your-site>/mcp/<MCP_SHARED_SECRET>`.
+4. Redeploy, then open the site root and unlock it with the secret. If the console loads your
+   sites, the connector works.
+5. Copy the connector URL from the console into Claude: **Settings → Connectors → Add custom
+   connector**. It is `https://<your-site>/mcp/<MCP_SHARED_SECRET>`.
 
 ## Endpoint
 
@@ -101,7 +104,7 @@ npm install -g netlify-cli
 NETLIFY_API_TOKEN=... MCP_SHARED_SECRET=dev-secret netlify dev
 ```
 
-Then `http://localhost:8888/` for the setup page, or drive the endpoint directly:
+Then `http://localhost:8888/` for the console, or drive the endpoint directly:
 
 ```bash
 curl -s http://localhost:8888/mcp/dev-secret \
