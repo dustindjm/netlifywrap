@@ -72,16 +72,36 @@ global.fetch = async (url, options = {}) => {
   return json({ message: `unstubbed ${method} ${path}` }, 404);
 };
 
-function request(body, { secret = SECRET, method = 'POST' } = {}) {
+// `via` mirrors how Netlify can hand the secret to the function: as the query
+// parameter its rewrite is supposed to produce, as the raw path when that
+// rewrite drops it, or as a bearer header.
+function request(body, { secret = SECRET, method = 'POST', via = 'query' } = {}) {
   delete require.cache[require.resolve('../netlify/functions/mcp.js')];
   const { handler } = require('../netlify/functions/mcp.js');
-  return handler({
+
+  const event = {
     httpMethod: method,
     headers: {},
-    queryStringParameters: secret === null ? {} : { k: secret },
+    queryStringParameters: {},
+    path: '/.netlify/functions/mcp',
+    rawUrl: 'https://example.netlify.app/.netlify/functions/mcp',
     body: body === undefined ? null : JSON.stringify(body),
     isBase64Encoded: false,
-  });
+  };
+
+  if (secret !== null) {
+    if (via === 'query') event.queryStringParameters = { k: secret };
+    if (via === 'path') {
+      event.path = '/mcp/' + encodeURIComponent(secret);
+      event.rawUrl = 'https://example.netlify.app/mcp/' + encodeURIComponent(secret);
+    }
+    if (via === 'rawurl') {
+      event.rawUrl = 'https://example.netlify.app/mcp/' + encodeURIComponent(secret);
+    }
+    if (via === 'bearer') event.headers = { authorization: 'Bearer ' + secret };
+  }
+
+  return handler(event);
 }
 
 async function rpc(method, params, options) {
@@ -133,6 +153,26 @@ test('no response ever carries a WWW-Authenticate challenge', async () => {
     assert.ok(!names.includes('www-authenticate'), 'must not advertise an auth challenge');
     assert.notStrictEqual(res.statusCode, 401);
   }
+});
+
+test('the secret is accepted from the path, the raw url, a header or the query', async () => {
+  // The Netlify rewrite is supposed to turn /mcp/<secret> into ?k=<secret>.
+  // When it does not, the secret is still in the request path, and the
+  // connector must not answer 403 to a correct secret because of plumbing.
+  for (const via of ['query', 'path', 'rawurl', 'bearer']) {
+    const res = await request({ jsonrpc: '2.0', id: 1, method: 'initialize' }, { via });
+    assert.strictEqual(res.statusCode, 200, 'secret via ' + via + ' → ' + res.body);
+  }
+});
+
+test('a rejection says whether a secret arrived at all', async () => {
+  const none = JSON.parse((await request({ jsonrpc: '2.0', id: 1, method: 'initialize' }, { secret: null })).body);
+  assert.strictEqual(none.secret_found_in, null);
+  assert.match(none.error, /No shared secret/);
+
+  const wrong = JSON.parse((await request({ jsonrpc: '2.0', id: 1, method: 'initialize' }, { secret: 'nope', via: 'path' })).body);
+  assert.deepStrictEqual(wrong.secret_found_in, ['url path']);
+  assert.match(wrong.error, /does not match/);
 });
 
 test('initialize negotiates the protocol version and names the server', async () => {

@@ -15,8 +15,8 @@
   force = true
 
 [[redirects]]
-  from = "/mcp/:secret"
-  to = "/.netlify/functions/mcp?k=:secret"
+  from = "/mcp/*"
+  to = "/.netlify/functions/mcp?k=:splat"
   status = 200
   force = true
 

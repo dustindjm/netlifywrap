@@ -50,12 +50,36 @@ function secretsMatch(given, expected) {
   return crypto.timingSafeEqual(a, b);
 }
 
+// The secret can arrive four ways. The path is the one that matters most:
+// Netlify rewrites /mcp/<secret> to this function, and whether the segment
+// survives as a query parameter depends on how that rewrite is evaluated, so
+// the function reads the original request path itself rather than trusting it.
+function secretFromPath(path) {
+  if (!path) return '';
+  const match = /\/mcp\/([^/?#]+)/.exec(String(path));
+  if (!match) return '';
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
 function presentedSecret(event) {
   const headers = event.headers || {};
+  const query = event.queryStringParameters || {};
   const auth = headers.authorization || headers.Authorization || '';
   const bearer = /^Bearer\s+(.+)$/i.exec(auth);
-  const query = event.queryStringParameters || {};
-  return (bearer && bearer[1].trim()) || headers['x-mcp-token'] || query.k || query.token || '';
+
+  const candidates = [
+    ['authorization header', bearer ? bearer[1].trim() : ''],
+    ['x-mcp-token header', headers['x-mcp-token'] || ''],
+    ['query parameter', query.k || query.token || ''],
+    ['url path', secretFromPath(event.path) || secretFromPath(event.rawUrl)],
+  ];
+
+  const found = candidates.filter(([, value]) => value);
+  return { value: found.length ? found[0][1] : '', sources: found.map(([name]) => name) };
 }
 
 function readBody(event) {
@@ -203,7 +227,8 @@ exports.handler = async (event) => {
     };
   }
 
-  const given = presentedSecret(event);
+  const presented = presentedSecret(event);
+  const given = presented.value;
   if (!given || !secretsMatch(given, expected)) {
     // Deliberately 403, not 401. A 401 is the MCP client's signal to start an
     // OAuth flow: it would go hunting for authorization-server metadata this
@@ -214,8 +239,12 @@ exports.handler = async (event) => {
       statusCode: 403,
       headers: JSON_HEADERS,
       body: JSON.stringify({
-        error:
-          'Wrong or missing shared secret. Use the full connector URL including its secret path segment (https://<site>/mcp/<MCP_SHARED_SECRET>), or send Authorization: Bearer <secret>. This connector uses no OAuth.',
+        error: given
+          ? 'The shared secret in this request does not match MCP_SHARED_SECRET on the site. This connector uses no OAuth.'
+          : 'No shared secret in this request. Use the full connector URL including its secret path segment (https://<site>/mcp/<MCP_SHARED_SECRET>), or send Authorization: Bearer <secret>. This connector uses no OAuth.',
+        // Names where a secret was found, never what it was — enough to tell a
+        // mistyped secret from one the rewrite dropped on the way in.
+        secret_found_in: presented.sources.length ? presented.sources : null,
       }),
     };
   }
