@@ -205,12 +205,17 @@ exports.handler = async (event) => {
 
   const given = presentedSecret(event);
   if (!given || !secretsMatch(given, expected)) {
+    // Deliberately 403, not 401. A 401 is the MCP client's signal to start an
+    // OAuth flow: it would go hunting for authorization-server metadata this
+    // connector does not publish, fail dynamic client registration, and report
+    // a sign-in problem instead of the real one. 403 says "wrong credential,
+    // there is nothing to sign in to" and surfaces this message as-is.
     return {
-      statusCode: 401,
+      statusCode: 403,
       headers: JSON_HEADERS,
       body: JSON.stringify({
         error:
-          'Unauthorized. Use the full connector URL including its secret path segment, or send Authorization: Bearer <secret>.',
+          'Wrong or missing shared secret. Use the full connector URL including its secret path segment (https://<site>/mcp/<MCP_SHARED_SECRET>), or send Authorization: Bearer <secret>. This connector uses no OAuth.',
       }),
     };
   }

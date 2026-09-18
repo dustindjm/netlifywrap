@@ -62,7 +62,13 @@ JSON-RPC protocol errors, so the model can read the error and react.
 
 With either required variable missing, the endpoint answers `503` for every request — it fails
 closed rather than exposing the token's reach to whoever finds the URL. A wrong or absent
-secret gets `401`, compared in constant time over SHA-256 digests so length doesn't leak.
+secret gets `403`, compared in constant time over SHA-256 digests so length doesn't leak.
+
+It is `403` rather than `401` on purpose. In MCP, a `401` tells the client to begin an OAuth
+flow: it would look for authorization-server metadata this connector doesn't publish, fail
+dynamic client registration, and report a sign-in failure instead of the real problem — a
+mistyped secret. `403` says the credential is wrong and there is nothing to sign in to, so the
+client shows that message. No response carries a `WWW-Authenticate` header.
 
 ## Tools
 

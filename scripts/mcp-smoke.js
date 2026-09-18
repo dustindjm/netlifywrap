@@ -112,11 +112,27 @@ test('refuses every request when the shared secret is unconfigured', async () =>
   assert.match(JSON.parse(res.body).error, /MCP_SHARED_SECRET/);
 });
 
-test('rejects a wrong secret, and a missing one', async () => {
-  assert.strictEqual((await request({ jsonrpc: '2.0', id: 1, method: 'initialize' }, { secret: 'nope' })).statusCode, 401);
-  assert.strictEqual((await request({ jsonrpc: '2.0', id: 1, method: 'initialize' }, { secret: null })).statusCode, 401);
-  // A secret of a different length must not crash the constant-time compare.
-  assert.strictEqual((await request({ jsonrpc: '2.0', id: 1, method: 'initialize' }, { secret: 'x' })).statusCode, 401);
+test('rejects a wrong secret with 403, never 401', async () => {
+  // 401 would make the MCP client start an OAuth flow against a connector that
+  // has no authorization server, turning "wrong secret" into "sign-in failed".
+  for (const secret of ['nope', null, 'x']) {
+    const res = await request({ jsonrpc: '2.0', id: 1, method: 'initialize' }, { secret });
+    assert.strictEqual(res.statusCode, 403, 'secret ' + JSON.stringify(secret));
+    assert.match(JSON.parse(res.body).error, /shared secret/);
+  }
+});
+
+test('no response ever carries a WWW-Authenticate challenge', async () => {
+  const cases = [
+    await request({ jsonrpc: '2.0', id: 1, method: 'initialize' }, { secret: 'nope' }),
+    await request({ jsonrpc: '2.0', id: 1, method: 'initialize' }),
+    await request(undefined, { method: 'GET', secret: null }),
+  ];
+  for (const res of cases) {
+    const names = Object.keys(res.headers || {}).map((h) => h.toLowerCase());
+    assert.ok(!names.includes('www-authenticate'), 'must not advertise an auth challenge');
+    assert.notStrictEqual(res.statusCode, 401);
+  }
 });
 
 test('initialize negotiates the protocol version and names the server', async () => {

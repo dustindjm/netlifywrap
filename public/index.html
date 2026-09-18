@@ -332,7 +332,9 @@
     let body = null;
     try { body = JSON.parse(text); } catch (e) { body = text; }
 
-    if (res.status === 401) throw new Error('Wrong secret. This is the value of MCP_SHARED_SECRET on the site.');
+    if (res.status === 403 || res.status === 401) {
+      throw new Error('Wrong secret. This is the value of MCP_SHARED_SECRET on the site.');
+    }
     if (res.status === 503) {
       const detail = (body && body.error) || 'Connector not configured.';
       throw new Error(detail);
