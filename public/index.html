@@ -192,6 +192,7 @@
         The value of <code>MCP_SHARED_SECRET</code> on this site. Kept in this tab only — never
         stored on the server.
       </p>
+      <p class="cap" id="probe" style="margin-top:var(--s8);">Checking endpoint…</p>
       <div id="gate-error" class="notice notice--sun hidden" style="margin-top:var(--s24);"></div>
     </div>
   </section>
@@ -658,11 +659,45 @@
     }
   });
 
-  const saved = recall();
-  if (saved) {
-    el('secret').value = saved;
-    connect();
+  /* --------------------------------------------------------- probe */
+  // Runs before anyone types anything: a plain GET on the endpoint reports
+  // whether the function is deployed and configured, so a silent failure
+  // here names itself instead of looking like a dead button.
+  async function probe() {
+    const line = el('probe');
+    try {
+      const res = await fetch(location.origin + '/mcp', { headers: { Accept: 'application/json' } });
+      if (res.status === 404) {
+        line.textContent = 'No /mcp endpoint on this site — this page is being served without its function. Check the deploy.';
+        return false;
+      }
+      const info = await res.json();
+      if (!info.ready) {
+        const missing = [];
+        if (!info.configured.netlify_api_token) missing.push('NETLIFY_API_TOKEN');
+        if (!info.configured.shared_secret) missing.push('MCP_SHARED_SECRET');
+        line.innerHTML = 'Not configured: <strong>' + missing.join('</strong> and <strong>') +
+          '</strong> ' + (missing.length > 1 ? 'are' : 'is') +
+          ' unset. Set ' + (missing.length > 1 ? 'them' : 'it') + ' in Netlify, then redeploy.';
+        setStatus('Not configured', 'dot--warn');
+        return false;
+      }
+      line.textContent = 'Endpoint ready · ' + info.tools + ' tools' + (info.read_only ? ' · read-only' : '');
+      return true;
+    } catch (err) {
+      line.textContent = 'Could not reach the endpoint: ' + err.message;
+      return false;
+    }
   }
+
+  (async function boot() {
+    const ready = await probe();
+    const saved = recall();
+    if (ready && saved) {
+      el('secret').value = saved;
+      connect();
+    }
+  })();
 })();
 </script>
 </body>

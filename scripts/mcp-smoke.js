@@ -154,6 +154,26 @@ test('tools/list advertises every tool with a schema and annotations', async () 
   assert.ok(tools.some((t) => t.name === 'netlify_trigger_build'));
 });
 
+test('a browser GET reports whether the connector is wired up', async () => {
+  const res = await request(undefined, { method: 'GET', secret: null });
+  assert.strictEqual(res.statusCode, 200);
+  const body = JSON.parse(res.body);
+  assert.strictEqual(body.ready, true);
+  assert.deepStrictEqual(body.configured, { netlify_api_token: true, shared_secret: true });
+  assert.ok(body.tools >= 15);
+  // It must never echo the secrets themselves.
+  assert.ok(!res.body.includes(SECRET), 'GET must not leak the shared secret');
+  assert.ok(!res.body.includes('nfp_fake_token'), 'GET must not leak the API token');
+
+  const saved = process.env.NETLIFY_API_TOKEN;
+  delete process.env.NETLIFY_API_TOKEN;
+  const missing = JSON.parse((await request(undefined, { method: 'GET', secret: null })).body);
+  process.env.NETLIFY_API_TOKEN = saved;
+  assert.strictEqual(missing.ready, false);
+  assert.strictEqual(missing.configured.netlify_api_token, false);
+  assert.match(missing.next_step, /redeploy/);
+});
+
 test('unknown methods get a JSON-RPC method-not-found', async () => {
   const res = await request({ jsonrpc: '2.0', id: 7, method: 'does/not/exist' });
   assert.strictEqual(JSON.parse(res.body).error.code, -32601);

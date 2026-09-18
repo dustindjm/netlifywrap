@@ -145,15 +145,31 @@ exports.handler = async (event) => {
     return { statusCode: 204, headers: CORS_HEADERS, body: '' };
   }
 
+  // MCP itself is POST-only, but a plain GET is the one check anyone can run
+  // from a browser address bar, so it reports whether the connector is wired
+  // up. It names no secrets and needs none: only whether each is present.
   if (event.httpMethod === 'GET') {
+    const configured = { netlify_api_token: !!apiToken(), shared_secret: !!sharedSecret() };
+    const ready = configured.netlify_api_token && configured.shared_secret;
     return {
-      statusCode: 405,
-      headers: { ...JSON_HEADERS, Allow: 'POST, DELETE, OPTIONS' },
-      body: JSON.stringify({
-        error: 'This MCP endpoint speaks JSON-RPC over POST. Server-initiated SSE streams are not offered.',
-        server: SERVER_INFO,
-        protocol_versions: SUPPORTED_PROTOCOLS,
-      }),
+      statusCode: 200,
+      headers: JSON_HEADERS,
+      body: JSON.stringify(
+        {
+          server: SERVER_INFO,
+          ready,
+          configured,
+          read_only: isReadOnly(),
+          site_allowlist: siteAllowlist().length ? siteAllowlist() : null,
+          tools: toolSchemas().length,
+          protocol_versions: SUPPORTED_PROTOCOLS,
+          next_step: ready
+            ? 'Connector is configured. POST JSON-RPC here, with the shared secret in the URL path or an Authorization: Bearer header.'
+            : 'Set the missing environment variable(s) in Netlify, then redeploy — env changes only reach a function on a new deploy.',
+        },
+        null,
+        2
+      ),
     };
   }
 
